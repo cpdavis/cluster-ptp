@@ -1,0 +1,145 @@
+---
+title: "Clustering analysis in R"
+author: "Charles Davis"
+date: "3/16/2021"
+output: html_document
+---
+
+First let's clear our workspace, then load in our libraries, and set our working directory. You'll need to
+change the file path to reflect where you place the downloaded folder.
+
+```{r clear}
+
+# clear the workspace (useful if we're not knitting)
+rm(list=ls())
+
+```
+
+Load in a function for checking packages
+
+```{r function-check-for-packages, include=FALSE}
+# let's use this handy package check from Alex's tutorials
+# make sure we can load packages 
+# (thanks to https://gist.github.com/smithdanielle/9913897)
+load_or_install_packages <- function(pkg){
+  new.pkg <- pkg[!(pkg %in% installed.packages()[, "Package"])]
+  if (length(new.pkg)) 
+    install.packages(new.pkg, 
+                     dependencies = TRUE,
+                     repos="http://cloud.r-project.org/")
+  sapply(pkg, require, character.only = TRUE)
+}
+```
+
+Let's install the necessary packages. Note that `factoextra` has a *ton* of
+dependencies, so it might take a minute. Let me know if I need to slow down the
+exercise
+
+```{r load-packages and set wd, message=FALSE, results="hide"}
+
+# specify which packages we'll need
+required_packages = c("cluster",
+                      "FactoMineR",
+                      "factoextra",
+                      "tidyverse",
+                      "ggthemes")
+
+# install them (if necessary) and load them
+load_or_install_packages(required_packages)
+
+# i've provided a modified dataset working on Obama's speech that Anne-Marie
+# provided last week. however, we will be operating on the word level instead -
+# i have combined the words uttered by Obama with a widely used set of affective
+# word norms that rate tens of thousands of words for 1) their valence (i.e.
+# positive or negative), 2) their arousal (intensity; low would be something
+# like dull, high would be something like terrorism), and 3) their dominance
+# (the degree to which a word implies control; how much does a word make you
+# feel controlled vs. in control?)
+
+# load data. don't forget to change your path
+obama_words <- read.csv("/Users/charles/Desktop/cluster-ptp/obama_words.csv", stringsAsFactors = FALSE)
+
+```
+Now let's load in some data and try out k-means clustering
+
+```{r test}
+
+# tutorial adapted from
+# https://www.datanovia.com/en/blog/cluster-analysis-in-r-simplified-and-enhanced/
+# and 
+# https://www.datanovia.com/en/lessons/k-means-clustering-in-r-algorith-and-practical-examples/
+
+# there are some duplicate words in the dataset, so let's take the average
+# duration for those words. the averages for the emotional characteristics are
+# meaningless here since those are stable within a word. including them only
+# ensures that they are present in the resulting dataset
+
+obama_words_unique <- obama_words %>% 
+  group_by(word) %>%
+  summarise(mean_duration=mean(duration),
+            mean_valence=mean(V.Mean.Sum),
+            mean_arousal=mean(A.Mean.Sum),
+            mean_dominance=mean(D.Mean.Sum))
+
+# we need to reformat so that each word is a row name instead of the first
+# column, so that the clustering plots will show each label. because tibbles
+# (tidyverse) do not handle row names, we need to do a little work to make this
+# happen.
+
+obama_row_names <- obama_words_unique[,1]
+obama_row_names <- as.data.frame(obama_row_names)
+obama_words_unique <- as.data.frame(obama_words_unique[,-1])
+row.names(obama_words_unique) <- obama_row_names$word
+
+# we don't want the clustering algorithm to depend on arbitrary units, so let's
+# scale our data. this is also often called mean-centering or standardizing
+
+obama_words_unique <- scale(obama_words_unique)
+
+# let's check the firt 10 rows of the data to make sure all looks good
+
+head(obama_words_unique, n = 10)
+
+# set a seed
+
+set.seed(01202009)
+
+# let's start by running this without specifying k
+# this will be what the algorithm determines optimal
+# 25 different random starting assignments and then select the best results
+# corresponding to the one with the lowest within cluster variation
+
+obama.km <- eclust(obama_words_unique, "kmeans", nstart = 25)
+
+# print the results
+print(obama.km)
+
+# optimal number of clusters using gap statistics
+obama.km$nbclust
+
+# gap statistic plot - this is a way to determine the optimal number of clusters. look for the "knee"
+fviz_gap_stat(obama.km$gap_stat)
+
+# let's try running it with 3 clusters
+obama.km.3 <- eclust(obama_words_unique, "kmeans", 3, nstart = 25)
+
+# let's visualize using a silhouette plot too
+fviz_silhouette(obama.km.3)
+
+# print the results
+print(obama.km.3)
+
+# we can also can check the mean value on each variable by cluster
+aggregate(obama_words_unique, by=list(cluster=obama.km.3$cluster), mean)
+
+# add clusters to our original data frame
+obama_words_clusters <- cbind(obama_words_unique, cluster = obama.km.3$cluster)
+head(obama_words_clusters)
+
+# play with ggplot integration
+fviz_cluster(obama.km.3, data = obama_words_unique,
+             ggtheme = theme_few(),
+             main = "Obama Word Clusters"
+             )
+
+```
